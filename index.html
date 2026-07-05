@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Glean Compass — Drift Detector</title>
+<style>
+  :root{
+    --navy:#1E2761; --navy-2:#27304C; --navy-3:#2B3A72;
+    --amber:#E0913A; --amber-tint:#FBF1E2; --amber-text:#8A6320;
+    --green:#3C9A6B; --green-tint:#E9F5EF; --green-text:#2F6B4C;
+    --red:#C0392B; --red-tint:#FBEBE9;
+    --blue-hi:#CADCFC; --blue-soft:#E9EEF8;
+    --bg:#F4F7FC; --card:#FFFFFF; --line:#E4E9F2;
+    --muted:#6B7392; --ink:#1E2761;
+    --serif:"Cambria","Georgia","Times New Roman",serif;
+    --sans:"Calibri","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --shadow:0 1px 2px rgba(30,39,97,.06),0 8px 24px rgba(30,39,97,.07);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{font-family:var(--sans); color:var(--navy-2); background:var(--bg); -webkit-font-smoothing:antialiased; line-height:1.5;}
+  .sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+
+  /* ---------- top bar ---------- */
+  .topbar{background:var(--navy); color:#fff; display:flex; align-items:center; justify-content:space-between; padding:14px 26px; gap:18px;}
+  .brand{display:flex; align-items:center; gap:12px}
+  .logo{width:34px;height:34px;border-radius:9px;background:var(--blue-hi);display:grid;place-items:center;color:var(--navy);flex:none;}
+  .logo svg{width:22px;height:22px}
+  .brand h1{font-family:var(--serif); font-size:20px; margin:0; letter-spacing:.2px; font-weight:600}
+  .byglean{font-size:12px; color:var(--blue-hi); opacity:.9; margin-left:2px}
+  .ctx{text-align:center; font-size:13px; color:#dfe6f7;}
+  .ctx strong{color:#fff; font-weight:600}
+  .ctx .wk{display:block; font-size:11.5px; color:var(--blue-hi); margin-top:1px; letter-spacing:.3px}
+  .userwrap{display:flex; align-items:center; gap:14px}
+  .user{display:flex; align-items:center; gap:9px}
+  .avatar{width:32px;height:32px;border-radius:50%;background:var(--amber);color:#fff;display:grid;place-items:center;font-weight:700;font-size:13px;flex:none;}
+  .user .u-name{font-size:13px; color:#fff; font-weight:600; line-height:1.15}
+  .user .u-role{font-size:11px; color:var(--blue-hi)}
+  .reset{background:transparent;border:1px solid #46508a;color:#dfe6f7;font:inherit;font-size:12.5px;padding:7px 13px;border-radius:8px;cursor:pointer;}
+  .reset:hover{background:#2a3466}
+
+  /* ---------- tabs ---------- */
+  .tabs{display:flex; gap:4px; padding:0 26px; background:#fff; border-bottom:1px solid var(--line);}
+  .tab{font:inherit; font-size:14px; font-weight:600; color:var(--muted); background:none; border:none; padding:14px 16px 12px; cursor:pointer; border-bottom:2.5px solid transparent; display:flex; align-items:center; gap:8px;}
+  .tab:hover{color:var(--navy)}
+  .tab.active{color:var(--navy); border-bottom-color:var(--amber)}
+  .tab .pill{font-size:11px; background:var(--amber-tint); color:var(--amber-text); border-radius:99px; padding:1px 8px; font-weight:700}
+
+  .wrap{max-width:1160px; margin:0 auto; padding:24px 26px 64px;}
+  .view{display:none} .view.active{display:block}
+
+  /* ---------- drift layout ---------- */
+  .drift-grid{display:grid; grid-template-columns:1fr 320px; gap:24px}
+  @media(max-width:900px){.drift-grid{grid-template-columns:1fr}}
+  .col-head{display:flex; align-items:baseline; justify-content:space-between; margin:2px 0 14px}
+  .col-head h2{font-family:var(--serif); font-size:17px; color:var(--navy); margin:0; font-weight:600}
+  .col-head .sub{font-size:12.5px; color:var(--muted)}
+
+  /* flag card */
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); margin-bottom:16px; overflow:hidden; border-left:4px solid var(--line); transition:opacity .3s, border-color .3s;}
+  .card.orphan{border-left-color:var(--amber)}
+  .card.stalled{border-left-color:var(--green)}
+  .card.resolved{opacity:.62}
+  .card-top{padding:16px 18px 4px; display:flex; align-items:flex-start; gap:12px}
+  .flag-ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:none;font-size:15px;}
+  .orphan .flag-ico{background:var(--amber-tint); color:var(--amber-text)}
+  .stalled .flag-ico{background:var(--green-tint); color:var(--green)}
+  .kind{font-size:11px; letter-spacing:.6px; text-transform:uppercase; font-weight:700; color:var(--muted)}
+  .orphan .kind{color:var(--amber-text)} .stalled .kind{color:var(--green)}
+  .title{font-family:var(--serif); font-size:18px; color:var(--navy); margin:2px 0 0; font-weight:600}
+  .conf{margin-left:auto; text-align:right; flex:none}
+  .conf .dots{font-size:14px; letter-spacing:2px; color:var(--navy)}
+  .conf .dots .off{color:var(--line)}
+  .conf .clabel{font-size:10.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px}
+  .card-body{padding:8px 18px 4px}
+  .desc{font-size:14px; color:var(--navy-2); margin:2px 0 12px}
+  .desc b{color:var(--navy)}
+  .evidence{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:11px 13px; font-size:12.5px; color:var(--muted); margin-bottom:6px;}
+  .evidence .row{display:flex; gap:8px; margin:3px 0}
+  .evidence .row b{color:var(--navy-2); font-weight:600; min-width:82px; flex:none}
+  .why{font-size:12.5px; color:var(--amber-text); background:var(--amber-tint); border-radius:8px; padding:9px 12px; margin:8px 0 4px;}
+  .stalled .why{color:var(--green-text); background:var(--green-tint)}
+  .why b{font-weight:700}
+  .actions{display:flex; gap:9px; padding:12px 18px 16px; flex-wrap:wrap; align-items:center}
+  .btn{font:inherit; font-size:13px; font-weight:600; border-radius:9px; padding:8px 14px; cursor:pointer; border:1px solid var(--line); background:#fff; color:var(--navy-2); transition:.15s;}
+  .btn:hover{border-color:var(--navy-3)}
+  .btn.primary{background:var(--navy); color:#fff; border-color:var(--navy)}
+  .btn.primary:hover{background:var(--navy-3)}
+  .btn.ghost{background:transparent}
+  .undo{font-size:12.5px; color:var(--muted)}
+  .undo a{color:var(--navy); cursor:pointer; text-decoration:underline; font-weight:600}
+  .panel{padding:0 18px 16px; display:none}
+  .panel.open{display:block; animation:fade .2s ease}
+  @keyframes fade{from{opacity:0;transform:translateY(-4px)}to{opacity:1}}
+  .panel .plabel{font-size:12px; color:var(--muted); margin:2px 0 8px}
+  .opt{display:block; width:100%; text-align:left; font:inherit; font-size:13px; cursor:pointer; background:#fff; border:1px solid var(--line); border-radius:9px; padding:9px 12px; margin-bottom:7px; color:var(--navy-2);}
+  .opt:hover{background:var(--blue-soft); border-color:var(--navy-3)}
+  .opt small{color:var(--muted); display:block; font-size:11.5px}
+  .reasons{display:flex; flex-wrap:wrap; gap:7px}
+  .reason{font:inherit; font-size:12.5px; cursor:pointer; background:#fff; border:1px solid var(--line); border-radius:99px; padding:7px 12px; color:var(--navy-2);}
+  .reason:hover{background:var(--amber-tint); border-color:var(--amber)}
+  .resbar{display:none; align-items:center; gap:9px; margin:0 18px 16px; padding:10px 13px; border-radius:10px; font-size:13px; font-weight:600;}
+  .resbar.show{display:flex}
+  .resbar.link{background:var(--green-tint); color:var(--green-text)}
+  .resbar.dismiss{background:var(--blue-soft); color:var(--navy)}
+  .resbar.discuss{background:var(--amber-tint); color:var(--amber-text)}
+
+  .healthy{margin-top:26px}
+  .healthy h3{font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--muted); margin:0 0 10px; font-weight:700}
+  .hrow{display:flex; align-items:center; gap:12px; padding:11px 14px; background:#fff; border:1px solid var(--line); border-radius:11px; margin-bottom:8px; font-size:13px;}
+  .hrow .dot{width:9px;height:9px;border-radius:50%;background:var(--green);flex:none}
+  .hrow .hs{font-weight:600; color:var(--navy)}
+  .hrow .arrow{color:var(--muted)}
+  .hrow .goal{color:var(--navy-2)}
+  .hrow .score{margin-left:auto; font-size:11.5px; color:var(--muted); background:var(--bg); border:1px solid var(--line); border-radius:99px; padding:3px 9px}
+
+  /* rail */
+  .rail .box{background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:16px 17px; margin-bottom:18px;}
+  .rail h3{font-family:var(--serif); font-size:15px; color:var(--navy); margin:0 0 12px; font-weight:600}
+  .prio{display:flex; align-items:center; gap:10px; padding:9px 0; border-top:1px solid var(--line); font-size:13px}
+  .prio:first-of-type{border-top:none}
+  .prio .pdot{width:9px;height:9px;border-radius:50%;flex:none}
+  .pdot.ok{background:var(--green)} .pdot.stall{background:var(--red)}
+  .prio .pname{color:var(--navy-2); flex:1}
+  .prio .powner{font-size:11px; color:var(--muted)}
+  .prio .pstatus{font-size:10.5px; text-transform:uppercase; letter-spacing:.4px; font-weight:700}
+  .pstatus.ok{color:var(--green)} .pstatus.stall{color:var(--red)}
+  .principle{font-size:12.5px; color:var(--muted)}
+  .principle .lr{display:flex; gap:9px; margin:9px 0; align-items:flex-start}
+  .principle .k{font-weight:700; color:var(--navy); flex:none}
+  .disc{font-size:11px; color:var(--muted); text-align:center; margin-top:2px}
+
+  /* ============ METRICS VIEW ============ */
+  .m-intro{display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin:2px 0 16px; flex-wrap:wrap}
+  .m-intro h2{font-family:var(--serif); font-size:18px; color:var(--navy); margin:0; font-weight:600}
+  .m-intro p{font-size:13px; color:var(--muted); margin:0; max-width:640px}
+  .m-section-h{font-size:11.5px; text-transform:uppercase; letter-spacing:.7px; color:var(--muted); font-weight:700; margin:26px 0 12px}
+  .heroes{display:grid; grid-template-columns:repeat(4,1fr); gap:14px}
+  @media(max-width:820px){.heroes{grid-template-columns:repeat(2,1fr)}}
+  .hero{background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:15px 16px; border-top:3px solid var(--line)}
+  .hero.star{border-top-color:var(--navy)} .hero.prec{border-top-color:var(--green)}
+  .hero.time{border-top-color:var(--navy-3)} .hero.cov{border-top-color:var(--amber)}
+  .hero .hlabel{font-size:12px; color:var(--muted); font-weight:600; display:flex; align-items:center; gap:6px}
+  .hero .hnum{font-family:var(--serif); font-size:34px; color:var(--navy); font-weight:600; line-height:1.1; margin:8px 0 2px}
+  .hero .hnum small{font-size:15px; color:var(--muted); font-weight:400}
+  .hero .hsub{font-size:11.5px; color:var(--muted); line-height:1.35}
+  .hero .tag{display:inline-block; font-size:10.5px; font-weight:700; padding:2px 8px; border-radius:99px; margin-top:7px}
+  .tag.good{background:var(--green-tint); color:var(--green-text)}
+  .tag.info{background:var(--blue-soft); color:var(--navy)}
+  .tag.warn{background:var(--amber-tint); color:var(--amber-text)}
+
+  .panel-white{background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:18px 20px; margin-bottom:16px}
+  .panel-white .ph{display:flex; align-items:baseline; justify-content:space-between; gap:12px; margin-bottom:4px; flex-wrap:wrap}
+  .panel-white h4{font-family:var(--serif); font-size:15.5px; color:var(--navy); margin:0; font-weight:600}
+  .panel-white .phnote{font-size:12px; color:var(--muted)}
+  .chart-legend{display:flex; gap:16px; font-size:11.5px; color:var(--muted); margin-top:6px; flex-wrap:wrap}
+  .chart-legend i{display:inline-block; width:20px; height:0; vertical-align:middle; margin-right:5px}
+  .lg-line{border-top:2.5px solid var(--green)}
+  .lg-target{border-top:2px dashed var(--muted)}
+  .lg-shadow{width:14px;height:12px;border-radius:3px;background:#EEF1F8;display:inline-block;vertical-align:middle;margin-right:5px}
+
+  .g3{display:grid; grid-template-columns:repeat(3,1fr); gap:14px}
+  @media(max-width:820px){.g3{grid-template-columns:1fr}}
+  .guard{background:#fff; border:1px solid var(--line); border-radius:14px; box-shadow:var(--shadow); padding:15px 16px}
+  .guard .glabel{font-size:12.5px; font-weight:700; color:var(--navy); display:flex; align-items:center; gap:7px}
+  .guard .gsub{font-size:11.5px; color:var(--muted); margin:3px 0 12px; line-height:1.35}
+  .gaugewrap{position:relative; height:10px; background:var(--bg); border:1px solid var(--line); border-radius:99px; margin:14px 0 6px}
+  .gaugefill{position:absolute; top:0; left:0; bottom:0; border-radius:99px; background:var(--green)}
+  .gaugethr{position:absolute; top:-5px; bottom:-5px; width:2px; background:var(--red)}
+  .gaugethr::after{content:attr(data-l); position:absolute; top:-16px; left:50%; transform:translateX(-50%); font-size:10px; color:var(--red); white-space:nowrap; font-weight:700}
+  .gaugerow{display:flex; justify-content:space-between; font-size:11px; color:var(--muted)}
+  .gbig{font-family:var(--serif); font-size:26px; color:var(--navy); font-weight:600}
+  .gcheck{display:flex; align-items:center; gap:8px; margin-top:14px; font-size:13px; color:var(--green-text); font-weight:600}
+  .gcheck .ok{width:22px;height:22px;border-radius:50%;background:var(--green-tint);display:grid;place-items:center;color:var(--green)}
+
+  /* autonomy ladder */
+  .g2{display:grid; grid-template-columns:1.35fr 1fr; gap:16px}
+  @media(max-width:820px){.g2{grid-template-columns:1fr}}
+  .ladder{list-style:none; margin:8px 0 0; padding:0; counter-reset:rung}
+  .ladder li{position:relative; padding:10px 12px 10px 42px; border:1px solid var(--line); border-radius:11px; margin-bottom:8px; font-size:12.5px; color:var(--navy-2); background:#fff}
+  .ladder li::before{counter-increment:rung; content:counter(rung); position:absolute; left:10px; top:50%; transform:translateY(-50%); width:22px;height:22px;border-radius:50%; background:var(--blue-soft); color:var(--navy); font-weight:700; display:grid; place-items:center; font-size:12px}
+  .ladder li b{color:var(--navy)}
+  .ladder li.done{background:var(--bg)} .ladder li.done::before{background:var(--green-tint); color:var(--green)}
+  .ladder li.now{border-color:var(--amber); background:var(--amber-tint)} .ladder li.now::before{background:var(--amber); color:#fff}
+  .ladder li.future{opacity:.7}
+  .ladder .rtag{font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; margin-left:6px}
+  .now .rtag{color:var(--amber-text)} .done .rtag{color:var(--green-text)}
+
+  .grid2{display:grid;grid-template-columns:auto 1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:8px}
+  .grid2 div{background:#fff;padding:10px 11px;font-size:12px}
+  .grid2 .hd{background:var(--bg);font-weight:700;color:var(--navy);font-size:11.5px}
+  .grid2 .yes{color:var(--green-text);font-weight:700}
+  .grid2 .no{color:var(--muted);font-weight:600}
+  .cxr-note{font-size:11.5px;color:var(--muted);margin-top:9px}
+
+  .footnote{font-size:12px;color:var(--muted);text-align:center;margin-top:22px}
+  .footnote b{color:var(--navy)}
+  .disc-b{font-size:11px; color:var(--muted); text-align:center; margin-top:20px}
+
+  /* toast */
+  .toast{position:fixed; left:50%; bottom:26px; transform:translateX(-50%) translateY(20px); background:var(--navy); color:#fff; padding:11px 18px; border-radius:11px; font-size:13px; box-shadow:0 10px 30px rgba(30,39,97,.3); opacity:0; pointer-events:none; transition:.25s; z-index:50; max-width:90vw;}
+  .toast.show{opacity:1; transform:translateX(-50%) translateY(0)}
+  .toast b{color:var(--blue-hi)}
+</style>
+</head>
+<body>
+<p class="sr-only">Glean Compass prototype: a Drift flags view with orphaned and stalled work cards, and a Metrics and trust dashboard showing flag precision, coverage, guardrails, and the path to autonomy.</p>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><polygon points="15.5 8.5 10.5 10.5 8.5 15.5 13.5 13.5" fill="currentColor" stroke="none"></polygon></svg>
+    </span>
+    <div><h1>Compass<span class="byglean">&nbsp;by Glean</span></h1></div>
+  </div>
+  <div class="ctx"><strong>Acme Platform Team</strong><span class="wk">Week of Jul 6</span></div>
+  <div class="userwrap">
+    <div class="user"><span class="avatar">CT</span><div><div class="u-name">Chloe Tan</div><div class="u-role">Team lead</div></div></div>
+    <button class="reset" onclick="resetDemo()">Reset demo</button>
+  </div>
+</div>
+
+<div class="tabs" role="tablist">
+  <button class="tab active" id="tab-drift" onclick="showView('drift')"><span>⚑ Drift flags</span><span class="pill" id="tabNeed">2</span></button>
+  <button class="tab" id="tab-metrics" onclick="showView('metrics')"><span>📊 Metrics &amp; trust</span></button>
+</div>
+
+<div class="wrap">
+  <!-- ================= DRIFT VIEW ================= -->
+  <div class="view active" id="view-drift">
+   <div class="drift-grid">
+    <div class="main">
+      <div class="col-head">
+        <h2>This week&rsquo;s drift</h2>
+        <span class="sub"><b id="needCount">2</b> flags need review &middot; high-precision only</span>
+      </div>
+
+      <!-- ORPHANED -->
+      <div class="card orphan" id="card-orphan">
+        <div class="card-top">
+          <span class="flag-ico">⚠</span>
+          <div><div class="kind">Orphaned work</div><div class="title">Billing migration</div></div>
+          <div class="conf"><div class="dots">●●●<span class="off">○</span></div><div class="clabel">Confidence</div></div>
+        </div>
+        <div class="card-body">
+          <div class="desc"><b>34 tickets · 4 engineers · active 3 weeks</b> — links to no current Q3 priority.</div>
+          <div class="evidence">
+            <div class="row"><b>Signal</b><span>34 Jira tickets + 6 PRs + 1 design doc, all tagged “billing-v2”.</span></div>
+            <div class="row"><b>Best match</b><span>“Reduce checkout latency” — semantic score <b style="color:var(--navy-2)">0.28</b> (below 0.60 bar).</span></div>
+            <div class="row"><b>Explicit link</b><span>None — no OKR / initiative reference in any artifact.</span></div>
+          </div>
+          <div class="why"><b>Why flagged:</b> real, sustained work with no priority behind it. Verify in seconds, then decide.</div>
+        </div>
+        <div class="resbar" id="res-orphan"></div>
+        <div class="actions" id="act-orphan">
+          <button class="btn primary" onclick="togglePanel('link-orphan',this)">Link to a priority</button>
+          <button class="btn" onclick="togglePanel('dismiss-orphan',this)">Dismiss…</button>
+          <button class="btn ghost" onclick="discuss('orphan')">Discuss</button>
+        </div>
+        <div class="panel" id="link-orphan">
+          <div class="plabel">Link “Billing migration” to a Q3 priority:</div>
+          <button class="opt" onclick="linkTo('orphan','Reduce checkout latency')">Reduce checkout latency <small>owner · J. Rivera</small></button>
+          <button class="opt" onclick="linkTo('orphan','Improve API uptime to 99.95%')">Improve API uptime to 99.95% <small>owner · M. Lee</small></button>
+          <button class="opt" onclick="linkNew('orphan')">+ This is its own priority — propose adding it <small>flags a gap in the Q3 set</small></button>
+        </div>
+        <div class="panel" id="dismiss-orphan">
+          <div class="plabel">Dismiss reason <span style="color:var(--navy)">(trains Compass for your team)</span>:</div>
+          <div class="reasons">
+            <button class="reason" onclick="dismiss('orphan','Tracked elsewhere (Notion)')">Tracked elsewhere</button>
+            <button class="reason" onclick="dismiss('orphan','Intentionally exploratory')">Intentionally exploratory</button>
+            <button class="reason" onclick="dismiss('orphan','Wrong owner')">Wrong owner</button>
+            <button class="reason" onclick="dismiss('orphan','Too low-priority to flag')">Too low-priority</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- STALLED -->
+      <div class="card stalled" id="card-stalled">
+        <div class="card-top">
+          <span class="flag-ico">◷</span>
+          <div><div class="kind">Stalled priority</div><div class="title">Launch SSO for enterprise</div></div>
+          <div class="conf"><div class="dots">●●●●</div><div class="clabel">Confidence</div></div>
+        </div>
+        <div class="card-body">
+          <div class="desc"><b>0 active work streams in 18 days.</b> Owner: <b>unassigned</b>.</div>
+          <div class="evidence">
+            <div class="row"><b>Signal</b><span>Stated Q3 priority with no linked tickets, PRs, docs or threads in 18 days.</span></div>
+            <div class="row"><b>Owner</b><span>Unassigned since the goal was imported.</span></div>
+            <div class="row"><b>Risk</b><span>Everyone assumes someone owns it; nobody does.</span></div>
+          </div>
+          <div class="why"><b>Why flagged:</b> a priority the company said matters, with no one moving it. Assign an owner or consciously de-scope.</div>
+        </div>
+        <div class="resbar" id="res-stalled"></div>
+        <div class="actions" id="act-stalled">
+          <button class="btn primary" onclick="togglePanel('assign-stalled',this)">Assign owner</button>
+          <button class="btn" onclick="togglePanel('dismiss-stalled',this)">Dismiss…</button>
+          <button class="btn ghost" onclick="discuss('stalled')">Discuss</button>
+        </div>
+        <div class="panel" id="assign-stalled">
+          <div class="plabel">Assign an owner to “Launch SSO for enterprise”:</div>
+          <button class="opt" onclick="assign('stalled','J. Rivera')">J. Rivera <small>Staff eng · owns identity surface</small></button>
+          <button class="opt" onclick="assign('stalled','M. Lee')">M. Lee <small>EM · Platform</small></button>
+          <button class="opt" onclick="assign('stalled','K. Shah')">K. Shah <small>Senior eng</small></button>
+        </div>
+        <div class="panel" id="dismiss-stalled">
+          <div class="plabel">Dismiss reason <span style="color:var(--navy)">(trains Compass for your team)</span>:</div>
+          <div class="reasons">
+            <button class="reason" onclick="dismiss('stalled','Deliberately deferred to Q4')">Deferred to Q4</button>
+            <button class="reason" onclick="dismiss('stalled','Owned outside this team')">Owned elsewhere</button>
+            <button class="reason" onclick="dismiss('stalled','Already de-scoped')">Already de-scoped</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="healthy">
+        <h3>Linked &amp; healthy — no action needed</h3>
+        <div class="hrow"><span class="dot"></span><span class="hs">Checkout latency fixes</span><span class="arrow">→</span><span class="goal">Reduce checkout latency</span><span class="score">semantic 0.83</span></div>
+        <div class="hrow"><span class="dot"></span><span class="hs">OTel logging rollout</span><span class="arrow">→</span><span class="goal">Migrate logging to OTel</span><span class="score">explicit link</span></div>
+        <div class="hrow"><span class="dot"></span><span class="hs">API rate-limit hardening</span><span class="arrow">→</span><span class="goal">Improve API uptime to 99.95%</span><span class="score">semantic 0.71</span></div>
+      </div>
+    </div>
+
+    <div class="rail">
+      <div class="box">
+        <h3>Q3 priorities · Platform</h3>
+        <div class="prio"><span class="pdot ok"></span><div class="pname">Reduce checkout latency <span class="powner">· J. Rivera</span></div><span class="pstatus ok">On&nbsp;track</span></div>
+        <div class="prio"><span class="pdot ok"></span><div class="pname">Migrate logging to OTel <span class="powner">· K. Shah</span></div><span class="pstatus ok">On&nbsp;track</span></div>
+        <div class="prio"><span class="pdot ok"></span><div class="pname">Improve API uptime to 99.95% <span class="powner">· M. Lee</span></div><span class="pstatus ok">On&nbsp;track</span></div>
+        <div class="prio"><span class="pdot stall"></span><div class="pname">Launch SSO for enterprise <span class="powner">· unassigned</span></div><span class="pstatus stall">Stalled</span></div>
+      </div>
+      <div class="box">
+        <h3>How Compass decides</h3>
+        <div class="principle">
+          <div class="lr"><span class="k">Precision first.</span><span>High-confidence, explainable flags only. Five you agree with beat fifty you don’t.</span></div>
+          <div class="lr"><span class="k">Flags work,</span><span>never people. Every card is framed for a decision, not a verdict.</span></div>
+          <div class="lr"><span class="k">Shows its work.</span><span>Each flag ships with its evidence, so you verify in seconds.</span></div>
+        </div>
+      </div>
+      <div class="disc">Prototype · PM exercise — Not a Glean product</div>
+    </div>
+   </div>
+  </div>
+
+  <!-- ================= METRICS VIEW ================= -->
+  <div class="view" id="view-metrics">
+    <div class="m-intro">
+      <div>
+        <h2>Metrics &amp; trust</h2>
+        <p>Compass lives or dies on one thing: <b style="color:var(--navy)">do people trust the flags?</b> So the scorecard leads with precision, not volume — and pairs every outcome with a guardrail against harm.</p>
+      </div>
+    </div>
+
+    <div class="m-section-h">Outcomes — is it working?</div>
+    <div class="heroes">
+      <div class="hero star">
+        <div class="hlabel">★ North star</div>
+        <div class="hnum" id="mDecisions">7</div>
+        <div class="hsub">Confirmed flags that led to a decision, this team, this week.</div>
+        <span class="tag info">re-link · assign · accept</span>
+      </div>
+      <div class="hero prec">
+        <div class="hlabel">◎ Flag precision</div>
+        <div class="hnum">78<small>%</small></div>
+        <div class="hsub">Flags you confirmed as real. Pilot bar ≥ 70%.</div>
+        <span class="tag good">✓ above the ≥70% bar</span>
+      </div>
+      <div class="hero time">
+        <div class="hlabel">⏱ Time-to-verify</div>
+        <div class="hnum">41<small>s</small></div>
+        <div class="hsub">Median seconds to act on a card — an evidence-quality proxy.</div>
+        <span class="tag good">✓ under 60s target</span>
+      </div>
+      <div class="hero cov">
+        <div class="hlabel">◈ Coverage</div>
+        <div class="hnum">86<small>%</small></div>
+        <div class="hsub">12 of 14 active work streams linked. This is recall.</div>
+        <span class="tag warn">tracked, never chased</span>
+      </div>
+    </div>
+
+    <div class="m-section-h">Precision — the metric Compass lives or dies on</div>
+    <div class="panel-white">
+      <div class="ph">
+        <h4>Flag precision over the pilot</h4>
+        <span class="phnote">Rises as the per-team classifier learns your dismiss/accept signal</span>
+      </div>
+      <svg id="precChart" viewBox="0 0 640 240" width="100%" role="img" aria-label="Precision rising from 64% to 71% to 78% across the pilot, crossing the 70% bar after shadow mode."></svg>
+      <div class="chart-legend">
+        <span><i class="lg-line"></i>Flag precision</span>
+        <span><i class="lg-target"></i>Pilot bar (≥70%)</span>
+        <span><i class="lg-shadow"></i>Shadow mode — flags visible only to the lead</span>
+      </div>
+    </div>
+
+    <div class="m-section-h">Guardrails — proof we watch for harm</div>
+    <div class="g3">
+      <div class="guard">
+        <div class="glabel">⚖ Dismiss rate</div>
+        <div class="gsub">Rising dismissals mean we’re becoming noise. An auto-throttle raises Compass’s own bar before that happens.</div>
+        <div><span class="gbig">18%</span> <span style="font-size:12px;color:var(--muted)">of flags</span></div>
+        <div class="gaugewrap">
+          <div class="gaugefill" style="width:18%"></div>
+          <div class="gaugethr" data-l="throttle 35%" style="left:35%"></div>
+        </div>
+        <div class="gaugerow"><span>0%</span><span>healthy — well below throttle</span></div>
+      </div>
+      <div class="guard">
+        <div class="glabel">🔕 Snooze / mute rate</div>
+        <div class="gsub">How often the weekly digest gets muted — an early signal the cadence or content is off.</div>
+        <div><span class="gbig">9%</span> <span style="font-size:12px;color:var(--muted)">of digests</span></div>
+        <div class="gaugewrap"><div class="gaugefill" style="width:9%;background:var(--navy-3)"></div></div>
+        <div class="gaugerow"><span>0%</span><span>low — digest is landing</span></div>
+      </div>
+      <div class="guard">
+        <div class="glabel">🛡 “Felt surveilled” signal</div>
+        <div class="gsub">A qualitative check that ICs don’t experience Compass as monitoring. If it ever reads as surveillance, the product fails.</div>
+        <div class="gcheck"><span class="ok">✓</span><span>None flagged this pilot</span></div>
+        <div class="gaugerow" style="margin-top:10px"><span>Compass flags work streams, never scores people.</span></div>
+      </div>
+    </div>
+
+    <div class="m-section-h">Trust → autonomy — earning the right to act</div>
+    <div class="g2">
+      <div class="panel-white" style="margin:0">
+        <div class="ph"><h4>The autonomy ladder</h4><span class="phnote">Each rung earns the next · gated on precision</span></div>
+        <ul class="ladder">
+          <li class="done">Observe silently — shadow mode, 2 weeks <span class="rtag">done</span></li>
+          <li class="now"><b>Surface to the lead</b> — weekly digest, high-precision flags <span class="rtag">you are here</span></li>
+          <li class="future">Surface to the team — ICs self-link their own work</li>
+          <li class="future">Act on the low-risk, reversible slice — auto-link, auto-nudge</li>
+          <li class="future">Higher-stakes actions stay human-approved — always</li>
+        </ul>
+      </div>
+      <div class="panel-white" style="margin:0">
+        <div class="ph"><h4>When Compass may act</h4></div>
+        <div class="cxr-note">The rule that governs “suggest → just do it”: <b style="color:var(--navy)">confidence × reversibility</b>.</div>
+        <div class="grid2">
+          <div class="hd"></div><div class="hd">Reversible<br><span style="font-weight:400;color:var(--muted)">link · nudge</span></div><div class="hd">Irreversible<br><span style="font-weight:400;color:var(--muted)">reassign · close</span></div>
+          <div class="hd">High conf.</div><div class="yes">Auto ✓</div><div class="no">Suggest</div>
+          <div class="hd">Low conf.</div><div class="no">Suggest</div><div class="no">Suggest</div>
+        </div>
+        <div class="cxr-note">Auto only in the green cell — and an auto-action there is one click to undo. By construction, nothing permanent happens automatically.</div>
+      </div>
+    </div>
+
+    <div class="footnote"><b>Precision over coverage.</b> A few trusted flags beat a noisy dashboard — so recall is tracked, never chased.</div>
+    <div class="disc-b">Prototype · PM exercise — Not a Glean product</div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+  var need = 2;
+  var decisions = 5;           // baseline decisions already made this week
+  var precision = 78;
+
+  function toast(html){
+    var t=document.getElementById('toast');
+    t.innerHTML=html; t.classList.add('show');
+    clearTimeout(window._tt); window._tt=setTimeout(function(){t.classList.remove('show')},2600);
+  }
+  function showView(v){
+    document.getElementById('view-drift').classList.toggle('active', v==='drift');
+    document.getElementById('view-metrics').classList.toggle('active', v==='metrics');
+    document.getElementById('tab-drift').classList.toggle('active', v==='drift');
+    document.getElementById('tab-metrics').classList.toggle('active', v==='metrics');
+    if(v==='metrics') drawChart();
+  }
+  function syncCounts(){
+    document.getElementById('needCount').textContent=need;
+    document.getElementById('tabNeed').textContent=need;
+    document.getElementById('mDecisions').textContent=decisions;
+  }
+  function closePanels(id){ document.getElementById('card-'+id).querySelectorAll('.panel').forEach(function(p){p.classList.remove('open')}); }
+  function togglePanel(pid,btn){
+    var p=document.getElementById(pid), card=p.closest('.card');
+    card.querySelectorAll('.panel').forEach(function(x){if(x!==p)x.classList.remove('open')});
+    p.classList.toggle('open');
+  }
+  function resolve(id,cls,html){
+    closePanels(id);
+    document.getElementById('card-'+id).classList.add('resolved');
+    document.getElementById('act-'+id).style.display='none';
+    var bar=document.getElementById('res-'+id);
+    bar.className='resbar show '+cls;
+    bar.innerHTML=html+' &nbsp;<span class="undo"><a onclick="undo(\''+id+'\')">Undo</a></span>';
+  }
+  function undo(id){
+    var card=document.getElementById('card-'+id);
+    if(!card.classList.contains('resolved'))return;
+    card.classList.remove('resolved');
+    document.getElementById('act-'+id).style.display='flex';
+    document.getElementById('res-'+id).className='resbar';
+    need++; decisions--; syncCounts();
+  }
+  function decided(){ need=Math.max(0,need-1); decisions++; syncCounts(); }
+  function linkTo(id,goal){ resolve(id,'link','🔗 Linked to <b style="font-weight:700">'+goal+'</b>'); decided(); toast('Decision recorded — <b>north-star +1</b>. Confirmed flag feeds precision.'); }
+  function linkNew(id){ resolve(id,'link','➕ Proposed as a new Q3 priority — sent to planning'); decided(); toast('Flag confirmed as a real gap. <b>Training signal recorded.</b>'); }
+  function assign(id,who){ resolve(id,'link','👤 Owner assigned: <b style="font-weight:700">'+who+'</b>'); decided(); toast('Owner assigned. <b>Stalled priority resolved.</b>'); }
+  function dismiss(id,reason){ resolve(id,'dismiss','✕ Dismissed — <b style="font-weight:700">'+reason+'</b>'); decided(); toast('Dismissed. <b>Reason tunes your team’s threshold</b> — fewer like this next week.'); }
+  function discuss(id){ resolve(id,'discuss','💬 Flagged for discussion — added to the weekly sync'); decided(); toast('Sent to the weekly sync. No verdict — a decision to make together.'); }
+  function resetDemo(){
+    ['orphan','stalled'].forEach(function(id){
+      var card=document.getElementById('card-'+id);
+      card.classList.remove('resolved'); closePanels(id);
+      document.getElementById('act-'+id).style.display='flex';
+      document.getElementById('res-'+id).className='resbar';
+    });
+    need=2; decisions=5; syncCounts(); toast('Demo reset.');
+  }
+
+  // ---- precision trajectory chart ----
+  function drawChart(){
+    var svg=document.getElementById('precChart');
+    if(svg.dataset.drawn) return; svg.dataset.drawn='1';
+    var W=640,H=240, L=48,R=24,T=24,B=44;
+    var x0=L, x1=W-R, y0=H-B, y1=T;
+    var yMin=55, yMax=85;
+    var pts=[{wk:'Week 1',v:64,shadow:true},{wk:'Week 2',v:71,shadow:true},{wk:'Week 3',v:78,shadow:false}];
+    var X=function(i){return x0+(x1-x0)*(i/(pts.length-1));};
+    var Y=function(v){return y0-(y0-y1)*((v-yMin)/(yMax-yMin));};
+    var ns='http://www.w3.org/2000/svg', el=function(t,a){var e=document.createElementNS(ns,t);for(var k in a)e.setAttribute(k,a[k]);return e;};
+    // shadow band over weeks 1-2
+    svg.appendChild(el('rect',{x:x0,y:y1,width:X(1)-x0,height:y0-y1,fill:'#EEF1F8'}));
+    svg.appendChild(el('text',{x:(x0+X(1))/2,y:y1+16,'text-anchor':'middle','font-size':11,fill:'#6B7392','font-weight':700,'font-family':'Calibri,sans-serif'})).textContent='Shadow mode';
+    // gridlines + y labels
+    [60,70,80].forEach(function(v){
+      svg.appendChild(el('line',{x1:x0,y1:Y(v),x2:x1,y2:Y(v),stroke:'#E4E9F2','stroke-width':1}));
+      svg.appendChild(el('text',{x:x0-8,y:Y(v)+4,'text-anchor':'end','font-size':11,fill:'#9AA6D6','font-family':'Calibri,sans-serif'})).textContent=v+'%';
+    });
+    // 70% target dashed
+    svg.appendChild(el('line',{x1:x0,y1:Y(70),x2:x1,y2:Y(70),stroke:'#6B7392','stroke-width':2,'stroke-dasharray':'5 5'}));
+    svg.appendChild(el('text',{x:x1,y:Y(70)-7,'text-anchor':'end','font-size':11,fill:'#6B7392','font-weight':700,'font-family':'Calibri,sans-serif'})).textContent='Pilot bar ≥70%';
+    // area + line
+    var d='';for(var i=0;i<pts.length;i++){d+=(i?'L':'M')+X(i)+' '+Y(pts[i].v)+' ';}
+    var area=d+'L'+X(pts.length-1)+' '+y0+' L'+x0+' '+y0+' Z';
+    svg.appendChild(el('path',{d:area,fill:'#E9F5EF',opacity:.7}));
+    svg.appendChild(el('path',{d:d,fill:'none',stroke:'#3C9A6B','stroke-width':2.5,'stroke-linejoin':'round','stroke-linecap':'round'}));
+    // points + labels
+    pts.forEach(function(p,i){
+      svg.appendChild(el('circle',{cx:X(i),cy:Y(p.v),r:5,fill:'#fff',stroke:'#3C9A6B','stroke-width':2.5}));
+      svg.appendChild(el('text',{x:X(i),y:Y(p.v)-13,'text-anchor':'middle','font-size':13,fill:'#1E2761','font-weight':700,'font-family':'Cambria,serif'})).textContent=p.v+'%';
+      svg.appendChild(el('text',{x:X(i),y:y0+20,'text-anchor':'middle','font-size':11.5,fill:'#6B7392','font-family':'Calibri,sans-serif'})).textContent=p.wk;
+      svg.appendChild(el('text',{x:X(i),y:y0+34,'text-anchor':'middle','font-size':10,fill:'#9AA6D6','font-family':'Calibri,sans-serif'})).textContent=p.shadow?'(hidden)':'(surfaced)';
+    });
+  }
+
+  syncCounts();
+</script>
+</body>
+</html>
